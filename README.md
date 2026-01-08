@@ -1,0 +1,2 @@
+# grid
+minimal grid puzzle
