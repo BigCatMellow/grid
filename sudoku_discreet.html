@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Grid</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; background: #2a2a2a; display: flex; align-items: center; justify-content: center; min-height: 100vh; }
+        .container { position: relative; }
+        #grid { display: grid; grid-template-columns: repeat(9, 20px); gap: 0; background: #1a1a1a; border: 1px solid #444; }
+        .cell { width: 20px; height: 20px; border: 1px solid #333; display: flex; align-items: center; justify-content: center; font-size: 11px; cursor: pointer; background: #2a2a2a; color: #888; user-select: none; position: relative; }
+        .cell.selected { background: #3d4a5c; }
+        .cell.highlight-same { background: #354050; }
+        .cell.highlight-related { background: #323232; }
+        .cell.given { color: #aaa; }
+        .cell.conflict { background: #4a3a2a; }
+        .cell.error { background: #4a2a2a; }
+        .cell:nth-child(3n) { border-right: 1px solid #555; }
+        .cell:nth-child(9n+1) { border-left: 1px solid #555; }
+        .cell:nth-child(n+1):nth-child(-n+9) { border-top: 1px solid #555; }
+        .cell:nth-child(n+19):nth-child(-n+27) { border-bottom: 1px solid #555; }
+        .cell:nth-child(n+46):nth-child(-n+54) { border-bottom: 1px solid #555; }
+        .cell:nth-child(n+73):nth-child(-n+81) { border-bottom: 1px solid #555; }
+        .cell .pencil { position: absolute; top: 0; left: 0; right: 0; bottom: 0; display: grid; grid-template-columns: repeat(3, 1fr); grid-template-rows: repeat(3, 1fr); }
+        .cell .pencil span { font-size: 6px; color: #666; display: flex; align-items: center; justify-content: center; }
+        .menu-btn { position: absolute; top: -14px; right: 0; font-size: 9px; color: #555; cursor: pointer; background: none; border: none; }
+        .menu-btn:hover { color: #888; }
+        .menu { display: none; position: absolute; top: -14px; right: 0; background: #333; border: 1px solid #444; border-radius: 4px; padding: 8px; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.4); min-width: 140px; }
+        .menu.show { display: block; }
+        .menu-section { margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px solid #444; }
+        .menu-section:last-child { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
+        .menu label { font-size: 9px; color: #666; display: block; margin-bottom: 2px; }
+        .menu select, .menu input { font-size: 10px; padding: 2px 4px; width: 100%; margin-bottom: 4px; background: #2a2a2a; border: 1px solid #444; color: #888; border-radius: 2px; }
+        .menu button { font-size: 10px; padding: 3px 4px; width: 100%; margin-bottom: 4px; cursor: pointer; background: #3a3a3a; border: 1px solid #444; color: #888; border-radius: 2px; }
+        .menu button:hover { background: #444; }
+        .menu button.active { background: #3d3d6e; border-color: #5858a8; }
+        .numrow { display: grid; grid-template-columns: repeat(9, 1fr); gap: 2px; margin-top: 4px; }
+        .numrow button { font-size: 9px; padding: 2px; min-width: 0; }
+        .status { font-size: 8px; color: #444; text-align: center; margin-top: 2px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <button class="menu-btn" onclick="toggleMenu()">☰</button>
+        <div class="menu" id="menu">
+            <div class="menu-section">
+                <label>Difficulty</label>
+                <select id="diffSelect">
+                    <option value="Beginner">Beginner</option>
+                    <option value="Easy">Easy</option>
+                    <option value="Medium" selected>Medium</option>
+                    <option value="Hard">Hard</option>
+                    <option value="Expert">Expert</option>
+                </select>
+                <label>Style</label>
+                <select id="styleSelect">
+                    <option value="traditional">Traditional</option>
+                    <option value="classic">Classic</option>
+                    <option value="random">Random</option>
+                </select>
+                <button onclick="newGame()">New Game</button>
+            </div>
+            <div class="menu-section">
+                <button id="noteBtn" onclick="toggleNoteMode()">Notes: OFF</button>
+                <button onclick="undo()">Undo</button>
+                <button onclick="clearCell()">Clear</button>
+                <button onclick="check()">Check</button>
+            </div>
+            <div class="menu-section">
+                <label>Seed</label>
+                <input type="text" id="seedInput" placeholder="Seed">
+                <button onclick="loadSeed()">Load Seed</button>
+            </div>
+            <div class="numrow">
+                <button onclick="enterNumber(1)">1</button>
+                <button onclick="enterNumber(2)">2</button>
+                <button onclick="enterNumber(3)">3</button>
+                <button onclick="enterNumber(4)">4</button>
+                <button onclick="enterNumber(5)">5</button>
+                <button onclick="enterNumber(6)">6</button>
+                <button onclick="enterNumber(7)">7</button>
+                <button onclick="enterNumber(8)">8</button>
+                <button onclick="enterNumber(9)">9</button>
+            </div>
+        </div>
+        <div id="grid"></div>
+        <div class="status" id="status"></div>
+    </div>
+    <script>
+        let board = [], solution = [], givenCells = new Set(), selected = null, history = [];
+        let difficulty = 'Medium', style = 'traditional', candidates = [], noteMode = false, currentSeed = null;
+        
+        function initCandidates() { candidates = Array(9).fill(null).map(() => Array(9).fill(null).map(() => new Set())); }
+        
+        function isValidPlacement(board, row, col, num) {
+            for (let i = 0; i < 9; i++) if (board[row][i] === num || board[i][col] === num) return false;
+            const br = Math.floor(row / 3) * 3, bc = Math.floor(col / 3) * 3;
+            for (let r = br; r < br + 3; r++) for (let c = bc; c < bc + 3; c++) if (board[r][c] === num) return false;
+            return true;
+        }
+        
+        function getPossible(board, row, col) {
+            const possible = [];
+            for (let n = 1; n <= 9; n++) if (isValidPlacement(board, row, col, n)) possible.push(n);
+            return possible;
+        }
+        
+        function countSolutions(board, limit = 2) {
+            const copy = board.map(r => [...r]);
+            let count = 0;
+            function findEmpty() {
+                let minCount = 10, best = null;
+                for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (copy[r][c] === 0) {
+                    let cnt = 0; for (let n = 1; n <= 9; n++) if (isValidPlacement(copy, r, c, n)) cnt++;
+                    if (cnt === 0) return null;
+                    if (cnt < minCount) { minCount = cnt; best = [r, c]; }
+                }
+                return best;
+            }
+            function solve() {
+                if (count >= limit) return;
+                const cell = findEmpty();
+                if (!cell) { count++; return; }
+                const [r, c] = cell;
+                for (let n = 1; n <= 9; n++) if (isValidPlacement(copy, r, c, n)) { copy[r][c] = n; solve(); copy[r][c] = 0; }
+            }
+            solve();
+            return count;
+        }
+        
+        let randState = 1;
+        function seededRandom() { randState |= 0; randState = randState + 0x6D2B79F5 | 0; let t = Math.imul(randState ^ randState >>> 15, 1 | randState); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }
+        function setSeed(seed) { currentSeed = seed; randState = seed; document.getElementById('seedInput').value = seed; }
+        function generateSeed() { return Math.floor(Math.random() * 2147483647); }
+        function shuffle(arr) { const a = [...arr]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(seededRandom() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+        
+        function generateCompleteBoard() {
+            const board = Array(9).fill(null).map(() => Array(9).fill(0));
+            for (let box = 0; box < 3; box++) { const nums = shuffle([1,2,3,4,5,6,7,8,9]); const br = box * 3; for (let i = 0; i < 9; i++) board[br + Math.floor(i/3)][br + (i%3)] = nums[i]; }
+            fillBoard(board);
+            return board;
+        }
+        
+        function fillBoard(board) {
+            let minCount = 10, best = null;
+            for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (board[r][c] === 0) { const count = getPossible(board, r, c).length; if (count < minCount) { minCount = count; best = [r, c]; } }
+            if (!best) return true;
+            const [row, col] = best;
+            for (const num of shuffle(getPossible(board, row, col))) { board[row][col] = num; if (fillBoard(board)) return true; board[row][col] = 0; }
+            return false;
+        }
+        
+        function getSymmetricPairs(symmetryType) {
+            const pairs = [], seen = new Set();
+            for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) {
+                const key = `${r},${c}`; if (seen.has(key)) continue;
+                let group = [[r, c]]; seen.add(key);
+                if (symmetryType === 'rotational') { const pr = 8 - r, pc = 8 - c, pk = `${pr},${pc}`; if (!seen.has(pk)) { group.push([pr, pc]); seen.add(pk); } }
+                else if (symmetryType === 'mirror-h') { const pc = 8 - c, pk = `${r},${pc}`; if (!seen.has(pk)) { group.push([r, pc]); seen.add(pk); } }
+                else if (symmetryType === 'mirror-v') { const pr = 8 - r, pk = `${pr},${c}`; if (!seen.has(pk)) { group.push([pr, c]); seen.add(pk); } }
+                else if (symmetryType === 'mirror-both') { for (const [pr, pc] of [[r, 8-c], [8-r, c], [8-r, 8-c]]) { const pk = `${pr},${pc}`; if (!seen.has(pk)) { group.push([pr, pc]); seen.add(pk); } } }
+                pairs.push(group);
+            }
+            for (let i = pairs.length - 1; i > 0; i--) { const j = Math.floor(seededRandom() * (i + 1)); [pairs[i], pairs[j]] = [pairs[j], pairs[i]]; }
+            return pairs;
+        }
+        
+        function analyzeDifficulty(board) {
+            const copy = board.map(r => [...r]);
+            let changed = true;
+            while (changed) {
+                changed = false;
+                for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (copy[r][c] === 0) { const poss = getPossible(copy, r, c); if (poss.length === 1) { copy[r][c] = poss[0]; changed = true; } }
+                if (changed) continue;
+                outer: for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (copy[r][c] === 0) {
+                    for (const num of getPossible(copy, r, c)) {
+                        let uniqueInRow = true, uniqueInCol = true, uniqueInBox = true;
+                        for (let cc = 0; cc < 9; cc++) if (cc !== c && copy[r][cc] === 0 && getPossible(copy, r, cc).includes(num)) uniqueInRow = false;
+                        for (let rr = 0; rr < 9; rr++) if (rr !== r && copy[rr][c] === 0 && getPossible(copy, rr, c).includes(num)) uniqueInCol = false;
+                        const br = Math.floor(r/3)*3, bc = Math.floor(c/3)*3;
+                        for (let rr = br; rr < br+3; rr++) for (let cc = bc; cc < bc+3; cc++) if ((rr!==r||cc!==c) && copy[rr][cc]===0 && getPossible(copy, rr, cc).includes(num)) uniqueInBox = false;
+                        if (uniqueInRow || uniqueInCol || uniqueInBox) { copy[r][c] = num; changed = true; break outer; }
+                    }
+                }
+            }
+            let unsolved = 0; for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (copy[r][c] === 0) unsolved++;
+            return { advanced: unsolved };
+        }
+        
+        function generateSudoku(level, puzzleStyle, seed) {
+            difficulty = level || difficulty; style = puzzleStyle || style;
+            setSeed(seed !== undefined ? seed : generateSeed());
+            const settings = { 'Beginner': { target: 30, maxAdvanced: 0 }, 'Easy': { target: 38, maxAdvanced: 0 }, 'Medium': { target: 46, maxAdvanced: 4 }, 'Hard': { target: 52, maxAdvanced: 10 }, 'Expert': { target: 56, maxAdvanced: 99 } };
+            const setting = settings[difficulty] || settings['Medium'];
+            solution = generateCompleteBoard();
+            board = solution.map(r => [...r]);
+            
+            if (style === 'random') {
+                const cells = []; for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) cells.push([r, c]); shuffle(cells);
+                let removed = 0;
+                for (const [r, c] of cells) { if (removed >= setting.target) break; const backup = board[r][c]; board[r][c] = 0; if (countSolutions(board) !== 1) board[r][c] = backup; else removed++; }
+            } else if (style === 'classic') {
+                const pairs = getSymmetricPairs('rotational');
+                pairs.sort((a, b) => (b.reduce((s, [r,c]) => s + Math.abs(r-4) + Math.abs(c-4), 0) / b.length) - (a.reduce((s, [r,c]) => s + Math.abs(r-4) + Math.abs(c-4), 0) / a.length));
+                for (let i = 0; i < pairs.length - 1; i++) if (seededRandom() < 0.25) [pairs[i], pairs[i+1]] = [pairs[i+1], pairs[i]];
+                let removed = 0;
+                for (const pair of pairs) {
+                    if (removed >= setting.target) break;
+                    const backups = pair.map(([r,c]) => board[r][c]); for (const [r,c] of pair) board[r][c] = 0;
+                    if (countSolutions(board) !== 1 || (setting.maxAdvanced < 99 && analyzeDifficulty(board).advanced > setting.maxAdvanced)) { for (let i = 0; i < pair.length; i++) board[pair[i][0]][pair[i][1]] = backups[i]; continue; }
+                    removed += pair.length;
+                }
+            } else {
+                const chosenSymmetry = ['rotational', 'mirror-h', 'mirror-v', 'mirror-both'][Math.floor(seededRandom() * 4)];
+                const pairs = getSymmetricPairs(chosenSymmetry);
+                pairs.sort((a, b) => b.reduce((s,[r,c]) => s + getPossible(board,r,c).length, 0) - a.reduce((s,[r,c]) => s + getPossible(board,r,c).length, 0));
+                for (let i = 0; i < pairs.length - 1; i++) if (seededRandom() < 0.3) [pairs[i], pairs[i+1]] = [pairs[i+1], pairs[i]];
+                let removed = 0;
+                for (const pair of pairs) {
+                    if (removed >= setting.target) break;
+                    const backups = pair.map(([r,c]) => board[r][c]); for (const [r,c] of pair) board[r][c] = 0;
+                    if (countSolutions(board) !== 1 || (setting.maxAdvanced < 99 && analyzeDifficulty(board).advanced > setting.maxAdvanced)) { for (let i = 0; i < pair.length; i++) board[pair[i][0]][pair[i][1]] = backups[i]; continue; }
+                    removed += pair.length;
+                }
+            }
+            givenCells.clear(); for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (board[r][c] !== 0) givenCells.add(`${r}-${c}`);
+            initCandidates(); history = []; selected = null; updateStatus();
+        }
+        
+        function render() {
+            const grid = document.getElementById('grid'); grid.innerHTML = '';
+            for (let row = 0; row < 9; row++) for (let col = 0; col < 9; col++) {
+                const cell = document.createElement('div'); cell.className = 'cell'; cell.dataset.row = row; cell.dataset.col = col;
+                const val = board[row][col];
+                if (val !== 0) { cell.textContent = val; if (givenCells.has(`${row}-${col}`)) cell.classList.add('given'); }
+                else if (candidates[row][col].size > 0) { const pencil = document.createElement('div'); pencil.className = 'pencil'; for (let n = 1; n <= 9; n++) { const span = document.createElement('span'); span.textContent = candidates[row][col].has(n) ? n : ''; pencil.appendChild(span); } cell.appendChild(pencil); }
+                cell.addEventListener('click', () => selectCell(row, col));
+                cell.addEventListener('dblclick', () => { if (!givenCells.has(`${row}-${col}`) && board[row][col] !== 0) { saveHistory(row, col); board[row][col] = 0; render(); } });
+                grid.appendChild(cell);
+            }
+            if (selected) highlightCell(selected.row, selected.col);
+            checkConflicts(); updateStatus();
+        }
+        
+        function selectCell(row, col) { selected = { row, col }; highlightCell(row, col); }
+        
+        function highlightCell(row, col) {
+            document.querySelectorAll('.cell').forEach(c => c.classList.remove('selected', 'highlight-same', 'highlight-related'));
+            document.querySelector(`[data-row="${row}"][data-col="${col}"]`).classList.add('selected');
+            const val = board[row][col];
+            if (val !== 0) document.querySelectorAll('.cell').forEach(c => { const r = +c.dataset.row, co = +c.dataset.col; if (board[r][co] === val && (r !== row || co !== col)) c.classList.add('highlight-same'); });
+            const br = Math.floor(row/3)*3, bc = Math.floor(col/3)*3;
+            document.querySelectorAll('.cell').forEach(c => { const r = +c.dataset.row, co = +c.dataset.col; if ((r === row || co === col || (r >= br && r < br+3 && co >= bc && co < bc+3)) && (r !== row || co !== col) && !c.classList.contains('highlight-same')) c.classList.add('highlight-related'); });
+        }
+        
+        function saveHistory(row, col) { history.push({ row, col, value: board[row][col], cands: new Set(candidates[row][col]) }); if (history.length > 100) history.shift(); }
+        function undo() { if (!history.length) return; const s = history.pop(); board[s.row][s.col] = s.value; candidates[s.row][s.col] = s.cands; selected = { row: s.row, col: s.col }; render(); }
+        
+        function enterNumber(num) {
+            if (!selected) return; const { row, col } = selected; if (givenCells.has(`${row}-${col}`)) return;
+            saveHistory(row, col);
+            if (noteMode) { if (board[row][col] === 0) candidates[row][col].has(num) ? candidates[row][col].delete(num) : candidates[row][col].add(num); }
+            else { board[row][col] = num; candidates[row][col].clear(); for (let c = 0; c < 9; c++) candidates[row][c].delete(num); for (let r = 0; r < 9; r++) candidates[r][col].delete(num); const br = Math.floor(row/3)*3, bc = Math.floor(col/3)*3; for (let r = br; r < br+3; r++) for (let c = bc; c < bc+3; c++) candidates[r][c].delete(num); }
+            render();
+        }
+        
+        function toggleNoteMode() { noteMode = !noteMode; document.getElementById('noteBtn').textContent = 'Notes: ' + (noteMode ? 'ON' : 'OFF'); document.getElementById('noteBtn').classList.toggle('active', noteMode); }
+        function clearCell() { if (!selected) return; const { row, col } = selected; if (givenCells.has(`${row}-${col}`)) return; saveHistory(row, col); board[row][col] = 0; candidates[row][col].clear(); render(); }
+        function checkConflicts() { document.querySelectorAll('.cell').forEach(c => c.classList.remove('conflict')); for (let row = 0; row < 9; row++) for (let col = 0; col < 9; col++) { const val = board[row][col]; if (!val) continue; for (let c = 0; c < 9; c++) if (c !== col && board[row][c] === val) { markConflict(row, col); markConflict(row, c); } for (let r = 0; r < 9; r++) if (r !== row && board[r][col] === val) { markConflict(row, col); markConflict(r, col); } const br = Math.floor(row/3)*3, bc = Math.floor(col/3)*3; for (let r = br; r < br+3; r++) for (let c = bc; c < bc+3; c++) if ((r !== row || c !== col) && board[r][c] === val) { markConflict(row, col); markConflict(r, c); } } }
+        function markConflict(row, col) { document.querySelector(`[data-row="${row}"][data-col="${col}"]`)?.classList.add('conflict'); }
+        function updateStatus() { let empty = 0; for (let r = 0; r < 9; r++) for (let c = 0; c < 9; c++) if (board[r][c] === 0) empty++; document.getElementById('status').textContent = empty; }
+        function check() { let correct = true, empty = false; document.querySelectorAll('.cell').forEach(c => c.classList.remove('error')); for (let row = 0; row < 9; row++) for (let col = 0; col < 9; col++) { if (board[row][col] === 0) empty = true; else if (board[row][col] !== solution[row][col]) { document.querySelector(`[data-row="${row}"][data-col="${col}"]`).classList.add('error'); correct = false; } } }
+        function toggleMenu() { document.getElementById('menu').classList.toggle('show'); }
+        function newGame() { difficulty = document.getElementById('diffSelect').value; style = document.getElementById('styleSelect').value; generateSudoku(); render(); toggleMenu(); }
+        function loadSeed() { const seed = parseInt(document.getElementById('seedInput').value); if (!isNaN(seed)) { generateSudoku(difficulty, style, seed); render(); } }
+        
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'n' || e.key === 'N') { e.preventDefault(); toggleNoteMode(); return; }
+            if (e.key === 'Escape') { document.getElementById('menu').classList.remove('show'); return; }
+            if (!selected) return; const { row, col } = selected;
+            if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); return; }
+            if (e.key === 'ArrowUp' && row > 0) { e.preventDefault(); selectCell(row-1, col); return; }
+            if (e.key === 'ArrowDown' && row < 8) { e.preventDefault(); selectCell(row+1, col); return; }
+            if (e.key === 'ArrowLeft' && col > 0) { e.preventDefault(); selectCell(row, col-1); return; }
+            if (e.key === 'ArrowRight' && col < 8) { e.preventDefault(); selectCell(row, col+1); return; }
+            if (givenCells.has(`${row}-${col}`)) return;
+            if (e.key >= '1' && e.key <= '9') enterNumber(parseInt(e.key));
+            else if (e.key === 'Backspace' || e.key === 'Delete' || e.key === '0') clearCell();
+        });
+        
+        document.addEventListener('click', (e) => { if (!e.target.closest('.menu') && !e.target.closest('.menu-btn')) document.getElementById('menu').classList.remove('show'); });
+        generateSudoku(); render();
+    </script>
+</body>
+</html>
